@@ -1,0 +1,126 @@
+---
+title: "Provisionnement"
+author: "EL KAMLI Adam "
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Importation des données
+
+```{r}
+library(readxl)
+library(ChainLadder)
+library(tidyverse)
+```
+
+```{r}
+Prov <- read_excel("C:\\Users\\user\\OneDrive\\Bureau\\S4\\S4-P2\\Assurance non vie\\provisions.xlsx")
+Prov <- as.data.frame(Prov)
+```
+
+On calcule les pertes cumules
+
+```{r}
+rownames(Prov) <-  Prov[,1]
+Prov = Prov[2:length(Prov[1,])]
+head(Prov)
+```
+
+```{r}
+Prov <- as.triangle(as.matrix(Prov))
+head(Prov)
+plot(Prov/10000, main = "Développement des sinistres selon les années")
+plot(Prov, lattice= T, main = "Développement des sinistres par années")
+```
+
+```{r}
+
+Prov_cum <- incr2cum(Prov)  #hd
+```
+
+# Chain ladder
+
+```{r}
+n <- 6
+f <- sapply(1:(n-1),
+            function(i){
+              sum(Prov_cum[c(1:(n-i)),i+1])/sum(Prov_cum[c(1:(n-i)),i])
+            }
+)
+f
+```
+
+```{r}
+dev.period <- 1:(n-1)
+plot(log(f-1) ~ dev.period, 
+     main="Log-linear extrapolation of age-to-age factors")
+tail.model <- lm(log(f-1) ~ dev.period)
+abline(tail.model)
+```
+
+```{r}
+co <- coef(tail.model)
+tail <- exp(co[1] + c(n:(n + 100)) * co[2]) + 1
+f.tail <- prod(tail)
+f.tail
+```
+
+```{r}
+plot(100*(rev(1/cumprod(rev(c(f, tail[tail>1.0001]))))), t="b",
+     main="Développement des sinistres espérée",
+     xlab="période.dev", ylab="Développement % de la perte ultime")
+```
+
+```{r}
+f <- c(f, f.tail)
+full_prov <- cbind(Prov_cum, Ult = rep(0, 6))
+for(k in 1:n){
+  full_prov[(n-k+1):n, k+1] <- full_prov[(n-k+1):n,k]*f[k]
+}
+round(full_prov)
+```
+
+```{r}
+
+reserve <- function(Prov_cum){
+ tt = as.matrix(Prov_cum)
+ chargeultime = Prov_cum[,length(Prov_cum[,1])]
+ paiements= diag(tt[,6:1])
+ r = chargeultime-paiements
+ return(r)
+}
+reserve(Prov_cum)
+
+```
+
+# MAck
+
+```{r}
+mack <- MackChainLadder(Prov_cum, est.sigma="Mack")
+mack
+```
+
+```{r}
+mack$FullTriangle
+```
+
+```{r}
+plot(mack)
+```
+
+```{r}
+plot(mack, lattice = T)
+```
+
+# GLM
+
+```{r}
+ligne <- rep(1:n,n)
+colonne <- rep(1:n, each = n)
+X <- as.vector(Prov_cum)
+lig <- as.factor(ligne)
+col <- as.factor(colonne)
+prov_glm <- as.data.frame(cbind(X, lig, col))
+fit1 <- glm(X~lig+col , data = prov_glm, family = Gamma(link = "log"))
+summary(fit1)
+```
